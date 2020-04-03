@@ -54,32 +54,6 @@ spec:
             exit 0
           fi
 
-          if [[ -z "${APIKEY}" ]]; then
-            echo "APIKEY is required"
-            exit 1
-          fi
-
-          if [[ -z "${RESOURCE_GROUP}" ]]; then
-            echo "RESOURCE_GROUP is required"
-            exit 1
-          fi
-
-          if [[ -z "${REGION}" ]]; then
-            echo "REGION is required"
-            exit 1
-          fi
-
-          if [[ -z "${APP_NAME}" ]]; then
-            echo "APP_NAME is required from package.json"
-            exit 1
-          fi
-
-          if [[ -z "${APP_VERSION}" ]]; then
-            echo "APP_VERSION is required from package.json"
-            exit 1
-          fi
-
-
           IMAGE_URL=$(outputs.resources.image.url)
 
           REGISTRY_URL=$(echo $IMAGE_URL | awk -F / '{print $1}')
