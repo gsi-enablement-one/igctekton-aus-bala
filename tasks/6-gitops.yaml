@@ -1,0 +1,101 @@
+apiVersion: tekton.dev/v1alpha1
+kind: Task
+metadata:
+  name: igc-gitops
+spec:
+  inputs:
+    resources:
+      - name: source
+        type: git
+      - name: image
+        type: image
+    params:
+      - name: js-image
+        type: string
+        default: docker.io/node:12-stretch
+      - name: tools-image
+        type: string
+        default: garagecatalyst/ibmcloud-dev:1.0.10
+  steps:
+    - name: setup
+      image: $(inputs.params.js-image)
+      workingdir: $(inputs.resources.source.path)
+      command: ["/bin/bash"]
+      env:
+        - name: BRANCH
+          value: "$(inputs.resources.source.revision)"
+      args:
+        - -c
+        - |
+          set -x
+          set +e
+
+          git fetch origin ${BRANCH} --tags
+          git checkout ${BRANCH}
+
+          echo "IMAGE_VERSION=$(git describe --abbrev=0 --tags)" > ./env-config
+          echo "IMAGE_NAME=$(basename -s .git `git config --get remote.origin.url` | tr '[:upper:]' '[:lower:]' | sed 's/_/-/g')" >> ./env-config
+
+          cat ./env-config
+    - name: gitops
+      image: $(inputs.params.tools-image)
+      workingdir: $(inputs.resources.source.path)
+      env:
+        - name: HOME
+          value: /home/devops
+      envFrom:
+        - secretRef:
+            name: gitops-cd-secret
+            optional: true
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          set -e
+          if [[ -z "${username}" ]]; then
+              echo "'username' not set. Not triggering CD pipeline"
+              exit 0
+          fi
+          if [[ -z "${password}" ]]; then
+              echo "'password' not set. Not triggering CD pipeline"
+              exit 0
+          fi
+          if [[ -z "${host}" ]]; then
+              echo "'host' not set. Not triggering CD pipeline"
+              exit 0
+          fi
+          if [[ -z "${org}" ]]; then
+              echo "'org' not set. Not triggering CD pipeline"
+              exit 0
+          fi
+          if [[ -z "${repo}" ]]; then
+              echo "'repo' not set. Not triggering CD pipeline"
+              exit 0
+          fi
+          if [[ -z "${branch}" ]]; then
+              branch="master"
+          fi
+
+          . ./env-config
+
+          # This email is not used and is not valid, you can ignore but git requires it
+          git config --global user.email "cloud-native-toolkit@example.com"
+          git config --global user.name "Cloud Native Toolkit Pipeline"
+
+          GIT_URL="https://${username}:${password}@${host}/${org}/${repo}"
+          git clone -b ${branch} ${GIT_URL} gitops_cd
+          cd gitops_cd
+
+          echo "Requirements before update"
+          cat "./${IMAGE_NAME}/requirements.yaml"
+
+          # TODO avoid using igc to use yq
+          npm i -g @garage-catalyst/ibm-garage-cloud-cli
+          igc yq w ./${IMAGE_NAME}/requirements.yaml "dependencies[?(@.name == '${IMAGE_NAME}')].version" ${IMAGE_VERSION} -i
+
+          echo "Requirements after update"
+          cat "./${IMAGE_NAME}/requirements.yaml"
+
+          git add -u
+          git commit -m "Updates ${IMAGE_NAME} to ${IMAGE_VERSION}"
+          git push -v
